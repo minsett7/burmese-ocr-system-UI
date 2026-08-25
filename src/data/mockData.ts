@@ -1,0 +1,993 @@
+import { 
+  ClaimDocument, 
+  OCRTemplate, 
+  AuditEvent, 
+  ServiceHealth 
+} from '../types';
+
+export const INITIAL_SERVICES: ServiceHealth[] = [
+  {
+    name: 'Burmese OCR Script Engine',
+    key: 'ocr_engine',
+    status: 'operational',
+    latencyMs: 142,
+    uptimePercentage: 99.96,
+    version: 'v4.2.8-mm-cnn',
+    description: 'Neural character recognition for combined Myanmar Unicode & Latin alphanumeric scripts.'
+  },
+  {
+    name: 'Layout & Template Matcher',
+    key: 'template_matcher',
+    status: 'operational',
+    latencyMs: 88,
+    uptimePercentage: 99.99,
+    version: 'v2.8.1-geom',
+    description: 'Vector-space bounding box alignment and multi-page carrier form anchor matching.'
+  },
+  {
+    name: 'Myanmar NLP Entity Normalizer',
+    key: 'nlp_normalizer',
+    status: 'operational',
+    latencyMs: 64,
+    uptimePercentage: 99.98,
+    version: 'v3.1.4-entity',
+    description: 'Automated normalization for NRC IDs, Myanmar dates, township codes, and Kyat amounts.'
+  },
+  {
+    name: 'Core ERP Sync Gateway',
+    key: 'sync_gateway',
+    status: 'operational',
+    latencyMs: 195,
+    uptimePercentage: 99.92,
+    version: 'v1.9.0-rest',
+    description: 'Direct bi-directional enterprise dispatch to KBZ MS, GGI, and AYA SOMPO claims core systems.'
+  }
+];
+
+export const INITIAL_TEMPLATES: OCRTemplate[] = [
+  {
+    id: 'tmpl-kbz-motor-01',
+    name: 'KBZ MS Comprehensive Motor Claim (Form-M04)',
+    nameMm: 'ကမ္ဘောဇ ယာဉ်မတော်တဆမှု အာမခံ လျော်ကြေးတောင်းခံလွှာ',
+    code: 'KBZ-M04-2026',
+    version: 'v2.4',
+    claimType: 'Motor / Vehicle',
+    carrier: 'KBZ MS General Insurance',
+    status: 'Active',
+    pageCount: 2,
+    fieldCount: 18,
+    lastUpdated: '2026-08-24 16:30',
+    updatedBy: 'Daw Khin Mar (Lead Reviewer)',
+    accuracyScore: 97.4,
+    totalProcessedCount: 1420,
+    stage: 'Approve',
+    sampleDocumentUrl: '/docs/kbz_motor_sample.pdf',
+    regions: [
+      {
+        id: 'reg-01',
+        fieldKey: 'policy_number',
+        nameEn: 'Policy Certificate Number',
+        nameMm: 'အာမခံ ပေါ်လစီအမှတ်',
+        category: 'policy',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 55, y: 14, width: 38, height: 4.5 },
+        confidenceThreshold: 85,
+        regexPattern: '^POL-[A-Z]{2,4}-\\d{6,8}$',
+        sampleValue: 'POL-MTR-20260481',
+        status: 'approved'
+      },
+      {
+        id: 'reg-02',
+        fieldKey: 'insurer_name',
+        nameEn: 'Insurance Carrier Name',
+        nameMm: 'အာမခံကုမ္ပဏီ အမည်',
+        category: 'policy',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 8, y: 8, width: 42, height: 5.5 },
+        confidenceThreshold: 90,
+        sampleValue: 'KBZ MS General Insurance Co., Ltd.',
+        status: 'approved'
+      },
+      {
+        id: 'reg-03',
+        fieldKey: 'claimant_name_en',
+        nameEn: 'Claimant Full Name (English)',
+        nameMm: 'အာမခံထားသူ အမည် (အင်္ဂလိပ်)',
+        category: 'claimant',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 8, y: 24, width: 40, height: 4.2 },
+        confidenceThreshold: 80,
+        sampleValue: 'U AUNG KYAW THU',
+        status: 'approved'
+      },
+      {
+        id: 'reg-04',
+        fieldKey: 'claimant_name_mm',
+        nameEn: 'Claimant Full Name (Myanmar)',
+        nameMm: 'အာမခံထားသူ အမည် (မြန်မာ)',
+        category: 'claimant',
+        dataType: 'text',
+        required: false,
+        box: { page: 1, x: 52, y: 24, width: 41, height: 4.2 },
+        confidenceThreshold: 75,
+        sampleValue: 'ဦးအောင်ကျော်သူ',
+        status: 'approved'
+      },
+      {
+        id: 'reg-05',
+        fieldKey: 'nrc_number',
+        nameEn: 'NRC / Citizen ID Number',
+        nameMm: 'နိုင်ငံသားစိစစ်ရေးကတ်ပြား အမှတ်',
+        category: 'claimant',
+        dataType: 'nrc',
+        required: true,
+        box: { page: 1, x: 8, y: 31, width: 40, height: 4.2 },
+        confidenceThreshold: 85,
+        regexPattern: '^\\d{1,2}/[A-Z\\(\\)]+\\(N\\)\\d{6}$',
+        sampleValue: '12/LKN(N)148293',
+        status: 'approved'
+      },
+      {
+        id: 'reg-06',
+        fieldKey: 'contact_phone',
+        nameEn: 'Primary Contact Phone',
+        nameMm: 'ဆက်သွယ်ရန် ဖုန်းနံပါတ်',
+        category: 'claimant',
+        dataType: 'phone',
+        required: true,
+        box: { page: 1, x: 52, y: 31, width: 41, height: 4.2 },
+        confidenceThreshold: 80,
+        sampleValue: '09-420088192',
+        status: 'approved'
+      },
+      {
+        id: 'reg-07',
+        fieldKey: 'incident_date',
+        nameEn: 'Date and Time of Loss',
+        nameMm: 'မတော်တဆ ဖြစ်ပွားသည့် နေ့စွဲနှင့် အချိန်',
+        category: 'incident',
+        dataType: 'date',
+        required: true,
+        box: { page: 1, x: 8, y: 41, width: 40, height: 4.2 },
+        confidenceThreshold: 85,
+        sampleValue: '2026-08-22 14:15',
+        status: 'approved'
+      },
+      {
+        id: 'reg-08',
+        fieldKey: 'incident_location',
+        nameEn: 'Accident Location / Township',
+        nameMm: 'ဖြစ်ပွားသည့် နေရာ / မြို့နယ်',
+        category: 'incident',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 52, y: 41, width: 41, height: 4.2 },
+        confidenceThreshold: 75,
+        sampleValue: 'Pyay Road, Hledan Junction, Kamayut Township, Yangon',
+        status: 'approved'
+      },
+      {
+        id: 'reg-09',
+        fieldKey: 'vehicle_plate_no',
+        nameEn: 'Vehicle License Plate Number',
+        nameMm: 'ယာဉ်လိုင်စင် အမှတ်',
+        category: 'incident',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 8, y: 48, width: 40, height: 4.2 },
+        confidenceThreshold: 85,
+        sampleValue: '7N-4821 (YGN)',
+        status: 'approved'
+      },
+      {
+        id: 'reg-10',
+        fieldKey: 'incident_description',
+        nameEn: 'Incident Summary & Damage',
+        nameMm: 'ဖြစ်စဉ်အကျဉ်းနှင့် ထိခိုက်ပျက်စီးမှု',
+        category: 'incident',
+        dataType: 'text',
+        required: false,
+        box: { page: 1, x: 8, y: 55, width: 85, height: 8.5 },
+        confidenceThreshold: 70,
+        sampleValue: 'Front bumper collision with city bus due to sudden braking. Left headlight assembly fractured.',
+        status: 'approved'
+      },
+      {
+        id: 'reg-11',
+        fieldKey: 'claimed_amount_mmk',
+        nameEn: 'Estimated Repair Estimate (MMK)',
+        nameMm: 'ခန့်မှန်းပြင်ဆင်စရိတ် (ကျပ်)',
+        category: 'payment',
+        dataType: 'currency',
+        required: true,
+        box: { page: 1, x: 8, y: 68, width: 40, height: 4.5 },
+        confidenceThreshold: 85,
+        sampleValue: '3,850,000 MMK',
+        status: 'approved'
+      },
+      {
+        id: 'reg-12',
+        fieldKey: 'workshop_name',
+        nameEn: 'Authorized Workshop / Garage',
+        nameMm: 'ပြင်ဆင်မည့် အလုပ်ရုံ အမည်',
+        category: 'payment',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 52, y: 68, width: 41, height: 4.5 },
+        confidenceThreshold: 80,
+        sampleValue: 'Grand Star Motors (Bahan, Yangon)',
+        status: 'approved'
+      },
+      {
+        id: 'reg-13',
+        fieldKey: 'settlement_bank_account',
+        nameEn: 'Settlement Account (KBZPay / CB / AYA)',
+        nameMm: 'လျော်ကြေးလွှဲပေးရမည့် ဘဏ်အကောင့်',
+        category: 'payment',
+        dataType: 'text',
+        required: false,
+        box: { page: 1, x: 8, y: 76, width: 85, height: 4.5 },
+        confidenceThreshold: 80,
+        sampleValue: 'KBZ Bank — 039-301-891048123 (U Aung Kyaw Thu)',
+        status: 'approved'
+      },
+      {
+        id: 'reg-14',
+        fieldKey: 'police_report_reference',
+        nameEn: 'Traffic Police Report Ref No.',
+        nameMm: 'ယာဉ်ထိန်းရဲစခန်း အစီရင်ခံစာအမှတ်',
+        category: 'internal',
+        dataType: 'text',
+        required: false,
+        box: { page: 1, x: 8, y: 84, width: 40, height: 4.2 },
+        confidenceThreshold: 75,
+        sampleValue: 'KMY-TP/2026/08-119',
+        status: 'approved'
+      },
+      {
+        id: 'reg-15',
+        fieldKey: 'assigned_assessor',
+        nameEn: 'Assigned Senior Assessor',
+        nameMm: 'စစ်ဆေးရေးမှူး အမည်',
+        category: 'internal',
+        dataType: 'text',
+        required: true,
+        box: { page: 1, x: 52, y: 84, width: 41, height: 4.2 },
+        confidenceThreshold: 85,
+        sampleValue: 'U Myo Min Tun (Surveyor #04)',
+        status: 'approved'
+      }
+    ]
+  },
+  {
+    id: 'tmpl-ggi-health-02',
+    name: 'GGI Tokio Marine Cashless Hospitalization (Med-H02)',
+    nameMm: 'ဂျီဂျီအိုင် ဆေးရုံတက်ကုသမှု အာမခံ လျော်ကြေးတောင်းခံလွှာ',
+    code: 'GGI-MED-2026',
+    version: 'v1.2',
+    claimType: 'Health & Hospitalization',
+    carrier: 'Grand Guardian Tokio Marine (GGI)',
+    status: 'Awaiting Approval',
+    pageCount: 3,
+    fieldCount: 22,
+    lastUpdated: '2026-08-24 14:10',
+    updatedBy: 'Ko Sai Lu (Template Specialist)',
+    accuracyScore: 94.2,
+    totalProcessedCount: 412,
+    stage: 'Review',
+    sampleDocumentUrl: '/docs/ggi_health_sample.pdf',
+    regions: []
+  },
+  {
+    id: 'tmpl-aya-fire-03',
+    name: 'AYA SOMPO Commercial Property & Fire Claim (Form-F01)',
+    nameMm: 'ဧရာဆွမ်ပို မီးဘေးနှင့် အဆောက်အဦ အာမခံ တောင်းခံလွှာ',
+    code: 'AYA-FIRE-01',
+    version: 'v1.0',
+    claimType: 'Fire & Property',
+    carrier: 'AYA SOMPO Insurance',
+    status: 'Awaiting Approval',
+    pageCount: 4,
+    fieldCount: 26,
+    lastUpdated: '2026-08-23 11:45',
+    updatedBy: 'Ma Thiri (Claims Ops)',
+    accuracyScore: 92.8,
+    totalProcessedCount: 180,
+    stage: 'Review',
+    sampleDocumentUrl: '/docs/aya_fire_sample.pdf',
+    regions: []
+  },
+  {
+    id: 'tmpl-ikbz-life-04',
+    name: 'IKBZ Life Group Term Policy Death Benefit Claim',
+    nameMm: 'အိုင်ကေဘီဇက် အသက်အာမခံ အကျိုးခံစားခွင့် တောင်းခံလွှာ',
+    code: 'IKBZ-LIFE-D09',
+    version: 'v1.1',
+    claimType: 'Life & Beneficiary',
+    carrier: 'IKBZ Insurance',
+    status: 'Awaiting Approval',
+    pageCount: 2,
+    fieldCount: 16,
+    lastUpdated: '2026-08-22 09:20',
+    updatedBy: 'Daw Khin Mar (Lead Reviewer)',
+    accuracyScore: 96.1,
+    totalProcessedCount: 320,
+    stage: 'Review',
+    sampleDocumentUrl: '/docs/ikbz_life_sample.pdf',
+    regions: []
+  },
+  {
+    id: 'tmpl-cb-crop-05',
+    name: 'CB Insurance Smallholder Crop Flood & Drought Relief',
+    nameMm: 'စီဘီ စိုက်ပျိုးစရိတ် သီးနှံပျက်စီးမှု အာမခံလွှာ',
+    code: 'CB-AGRI-02',
+    version: 'v0.9',
+    claimType: 'Agricultural Crop',
+    carrier: 'Citizen Business Insurance (CB)',
+    status: 'Awaiting Approval',
+    pageCount: 2,
+    fieldCount: 14,
+    lastUpdated: '2026-08-21 17:30',
+    updatedBy: 'Ko Hlaing Bwar (Agronomist Liaison)',
+    accuracyScore: 91.5,
+    totalProcessedCount: 95,
+    stage: 'Map Fields',
+    sampleDocumentUrl: '/docs/cb_crop_sample.pdf',
+    regions: []
+  },
+  {
+    id: 'tmpl-myanma-travel-06',
+    name: 'Myanma Insurance Inbound/Outbound Travel Accident',
+    nameMm: 'မြန်မာ့အာမခံ ခရီးသွား မတော်တဆမှု တောင်းခံလွှာ',
+    code: 'MI-TRV-2026',
+    version: 'v1.0',
+    claimType: 'Travel & Accident',
+    carrier: 'Myanma Insurance',
+    status: 'Awaiting Approval',
+    pageCount: 1,
+    fieldCount: 12,
+    lastUpdated: '2026-08-20 15:10',
+    updatedBy: 'Ko Sai Lu (Template Specialist)',
+    accuracyScore: 95.0,
+    totalProcessedCount: 210,
+    stage: 'Detect Regions',
+    sampleDocumentUrl: '/docs/mi_travel_sample.pdf',
+    regions: []
+  },
+  {
+    id: 'tmpl-kbz-health-07',
+    name: 'KBZ MS Individual Critical Illness Benefit Form',
+    nameMm: 'ကမ္ဘောဇ ပြင်းထန်ရောဂါ အထူးအာမခံ လျော်ကြေးလွှာ',
+    code: 'KBZ-CI-08',
+    version: 'v0.8',
+    claimType: 'Health & Hospitalization',
+    carrier: 'KBZ MS General Insurance',
+    status: 'Awaiting Approval',
+    pageCount: 3,
+    fieldCount: 20,
+    lastUpdated: '2026-08-20 10:00',
+    updatedBy: 'Ma Thiri (Claims Ops)',
+    accuracyScore: 93.4,
+    totalProcessedCount: 64,
+    stage: 'Review',
+    sampleDocumentUrl: '/docs/kbz_ci_sample.pdf',
+    regions: []
+  }
+];
+
+export const INITIAL_DOCUMENTS: ClaimDocument[] = [
+  {
+    id: 'doc-0884',
+    claimNumber: 'CLM-2026-0884',
+    fileName: 'CLM-2026-0884_KBZ_MotorClaim.pdf',
+    fileSize: '2.4 MB',
+    pageCount: 2,
+    claimType: 'Motor / Vehicle',
+    carrierName: 'KBZ MS General Insurance',
+    carrierLogo: 'KBZ',
+    policyNumber: 'POL-MTR-20260481',
+    claimantNameEn: 'U Aung Kyaw Thu',
+    claimantNameMm: 'ဦးအောင်ကျော်သူ',
+    nrcNumber: '12/LKN(N)148293',
+    claimedAmount: 3850000,
+    currency: 'MMK',
+    status: 'Needs Review',
+    overallConfidence: 84.2,
+    templateMatchScore: 98.4,
+    matchedTemplateId: 'tmpl-kbz-motor-01',
+    matchedTemplateName: 'KBZ MS Comprehensive Motor Claim (Form-M04)',
+    uploadedAt: '2026-08-25 08:15',
+    age: '24 mins ago',
+    assignedReviewer: 'Daw Khin Mar (You)',
+    issuesCount: 2,
+    rawOcrText: `KBZ MS GENERAL INSURANCE CO., LTD.
+COMPREHENSIVE MOTOR VEHICLE CLAIM FORM
+POLICY NO: POL-MTR-20260481   DATE: 22/08/2026
+CLAIMANT: U AUNG KYAW THU (ဦးအောင်ကျော်သူ)
+NRC: 12/LKN(N)148293   PHONE: 09-420088192
+INCIDENT: 2026-08-22 14:15 @ Kamayut Township, Yangon
+VEHICLE: 7N-4821 Toyota Crown 2018
+ESTIMATE: 3,850,000 MMK @ Grand Star Motors
+ACCOUNT: KBZ Bank 039-301-891048123`,
+    fields: [
+      {
+        id: 'f-01',
+        key: 'policy_number',
+        labelEn: 'Policy Certificate Number',
+        labelMm: 'အာမခံ ပေါ်လစီအမှတ်',
+        category: 'policy',
+        value: 'POL-MTR-20260481',
+        originalOcrValue: 'POL-MTR-20260481',
+        confidence: 98,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 55, y: 14, width: 38, height: 4.5 }
+      },
+      {
+        id: 'f-02',
+        key: 'carrier_name',
+        labelEn: 'Insurance Carrier Name',
+        labelMm: 'အာမခံကုမ္ပဏီ အမည်',
+        category: 'policy',
+        value: 'KBZ MS General Insurance Co., Ltd.',
+        originalOcrValue: 'KBZ MS GENERAL INSURANCE',
+        confidence: 99,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 8, width: 42, height: 5.5 }
+      },
+      {
+        id: 'f-03',
+        key: 'policy_issue_date',
+        labelEn: 'Policy Issue & Validity Date',
+        labelMm: 'ပေါ်လစီ စတင်ထုတ်ပေးသည့် ရက်စွဲ',
+        category: 'policy',
+        value: '2026-01-15',
+        originalOcrValue: '15/01/2026',
+        confidence: 96,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'date',
+        boundingBox: { page: 1, x: 55, y: 19, width: 38, height: 4.0 }
+      },
+      {
+        id: 'f-04',
+        key: 'claimant_name_en',
+        labelEn: 'Claimant Full Name (English)',
+        labelMm: 'အာမခံထားသူ အမည် (အင်္ဂလိပ်)',
+        category: 'claimant',
+        value: 'U AUNG KYAW THU',
+        originalOcrValue: 'U AUNG KYAW THU',
+        confidence: 95,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 24, width: 40, height: 4.2 }
+      },
+      {
+        id: 'f-05',
+        key: 'claimant_name_mm',
+        labelEn: 'Claimant Full Name (Myanmar Script)',
+        labelMm: 'အာမခံထားသူ အမည် (မြန်မာ)',
+        category: 'claimant',
+        value: 'ဦးအောင်ကျော်သူ',
+        originalOcrValue: 'ဦးအောင်ကျာ်သူ',
+        confidence: 76,
+        isEdited: false,
+        isRequired: false,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 52, y: 24, width: 41, height: 4.2 },
+        validationIssues: [
+          {
+            id: 'v-01',
+            fieldKey: 'claimant_name_mm',
+            severity: 'warning',
+            message: 'Burmese OCR character ambiguity: Possible medial "ကျော်" vs "ကျာ်". Auto-corrected to "ဦးအောင်ကျော်သူ".',
+            messageMm: 'မြန်မာစာလုံးပေါင်း အမှားပြင်ဆင်ရန် စစ်ဆေးပါ ("ကျော်")',
+            autoFixable: true
+          }
+        ]
+      },
+      {
+        id: 'f-06',
+        key: 'nrc_number',
+        labelEn: 'NRC / Citizen ID Number',
+        labelMm: 'နိုင်ငံသားစိစစ်ရေးကတ်ပြား အမှတ်',
+        category: 'claimant',
+        value: '12/LKN(N)148293',
+        originalOcrValue: '12/LKN(N)148293',
+        confidence: 92,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'nrc',
+        boundingBox: { page: 1, x: 8, y: 31, width: 40, height: 4.2 }
+      },
+      {
+        id: 'f-07',
+        key: 'contact_phone',
+        labelEn: 'Primary Contact Mobile Phone',
+        labelMm: 'ဆက်သွယ်ရန် မိုဘိုင်းဖုန်း',
+        category: 'claimant',
+        value: '09-420088192',
+        originalOcrValue: '09-420088192',
+        confidence: 97,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'phone',
+        boundingBox: { page: 1, x: 52, y: 31, width: 41, height: 4.2 }
+      },
+      {
+        id: 'f-08',
+        key: 'claimant_address',
+        labelEn: 'Residential Address (Township & City)',
+        labelMm: 'နေရပ်လိပ်စာ (မြို့နယ်နှင့် မြို့)',
+        category: 'claimant',
+        value: 'No. 42, Inya Myaing Road, Bahan Township, Yangon',
+        originalOcrValue: 'No. 42, Inya Myaing Rd, Bahan, Yangon',
+        confidence: 88,
+        isEdited: false,
+        isRequired: false,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 36, width: 85, height: 4.2 }
+      },
+      {
+        id: 'f-09',
+        key: 'incident_date',
+        labelEn: 'Date and Time of Occurrence',
+        labelMm: 'မတော်တဆ ဖြစ်ပွားသည့် နေ့စွဲနှင့် အချိန်',
+        category: 'incident',
+        value: '2026-08-22 14:15',
+        originalOcrValue: '22/08/2026 14:15',
+        confidence: 94,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'date',
+        boundingBox: { page: 1, x: 8, y: 41, width: 40, height: 4.2 }
+      },
+      {
+        id: 'f-10',
+        key: 'incident_location',
+        labelEn: 'Accident Exact Location',
+        labelMm: 'ဖြစ်ပွားသည့် တိကျသောနေရာ',
+        category: 'incident',
+        value: 'Pyay Road, Near Hledan Junction, Kamayut Township, Yangon',
+        originalOcrValue: 'Pyay Rd, Hledan, Kamayut, Yangon',
+        confidence: 86,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 52, y: 41, width: 41, height: 4.2 }
+      },
+      {
+        id: 'f-11',
+        key: 'vehicle_plate_no',
+        labelEn: 'Vehicle License Registration Plate',
+        labelMm: 'ယာဉ်လိုင်စင် အမှတ်',
+        category: 'incident',
+        value: '7N-4821 (YGN)',
+        originalOcrValue: '7N-4821',
+        confidence: 91,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 48, width: 40, height: 4.2 }
+      },
+      {
+        id: 'f-12',
+        key: 'incident_description',
+        labelEn: 'Damage Breakdown & Circumstances',
+        labelMm: 'ဖြစ်စဉ်အကျဉ်းနှင့် ထိခိုက်ပျက်စီးမှု အသေးစိတ်',
+        category: 'incident',
+        value: 'Front bumper collision with city transit bus after sudden emergency stop. Left radiator bracket and headlight assembly fractured.',
+        originalOcrValue: 'Front bumper collision with bus. Radiator bracket fractured.',
+        confidence: 82,
+        isEdited: false,
+        isRequired: false,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 55, width: 85, height: 8.5 }
+      },
+      {
+        id: 'f-13',
+        key: 'claimed_amount_mmk',
+        labelEn: 'Estimated Repair Claim (MMK)',
+        labelMm: 'ခန့်မှန်းပြင်ဆင်စရိတ် တောင်းခံငွေ (ကျပ်)',
+        category: 'payment',
+        value: '3,850,000',
+        originalOcrValue: '3,850,000 MMK',
+        confidence: 95,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'currency',
+        boundingBox: { page: 1, x: 8, y: 68, width: 40, height: 4.5 }
+      },
+      {
+        id: 'f-14',
+        key: 'workshop_name',
+        labelEn: 'Authorized Repair Workshop',
+        labelMm: 'ပြင်ဆင်မည့် အလုပ်ရုံ အမည်',
+        category: 'payment',
+        value: 'Grand Star Motors (Bahan Workshop, Yangon)',
+        originalOcrValue: 'Grand Star Motors (Bahan, Yangon)',
+        confidence: 89,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 52, y: 68, width: 41, height: 4.5 }
+      },
+      {
+        id: 'f-15',
+        key: 'settlement_bank_account',
+        labelEn: 'Disbursement Bank Account / KBZPay',
+        labelMm: 'ငွေပေးချေမည့် ဘဏ်အကောင့် (KBZPay / ဘဏ်)',
+        category: 'payment',
+        value: 'KBZ Bank — 039-301-891048123',
+        originalOcrValue: 'KBZ 039-301-891048123 (U Aung Kyaw Thu)',
+        confidence: 68,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 76, width: 85, height: 4.5 },
+        validationIssues: [
+          {
+            id: 'v-02',
+            fieldKey: 'settlement_bank_account',
+            severity: 'warning',
+            message: 'Bank account number detected with medium OCR confidence (68%). Please verify against customer bank book snapshot.',
+            messageMm: 'ဘဏ်အကောင့်နံပါတ် သေချာစွာ စစ်ဆေးပေးပါ',
+            autoFixable: false
+          }
+        ]
+      },
+      {
+        id: 'f-16',
+        key: 'police_report_reference',
+        labelEn: 'Traffic Police Docket Reference',
+        labelMm: 'ယာဉ်ထိန်းရဲစခန်း အစီရင်ခံစာအမှတ်',
+        category: 'internal',
+        value: 'KMY-TP/2026/08-119',
+        originalOcrValue: 'KMY-TP/2026/08-119',
+        confidence: 93,
+        isEdited: false,
+        isRequired: false,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 8, y: 84, width: 40, height: 4.2 }
+      },
+      {
+        id: 'f-17',
+        key: 'assigned_assessor',
+        labelEn: 'Assigned Senior Assessor',
+        labelMm: 'စစ်ဆေးရေးမှူး အမည်',
+        category: 'internal',
+        value: 'U Myo Min Tun (Surveyor #04)',
+        originalOcrValue: 'U Myo Min Tun (#04)',
+        confidence: 94,
+        isEdited: false,
+        isRequired: true,
+        dataType: 'text',
+        boundingBox: { page: 1, x: 52, y: 84, width: 41, height: 4.2 }
+      }
+    ]
+  },
+  {
+    id: 'doc-0883',
+    claimNumber: 'CLM-2026-0883',
+    fileName: 'CLM-2026-0883_GGI_HealthClaim.pdf',
+    fileSize: '1.8 MB',
+    pageCount: 3,
+    claimType: 'Health & Hospitalization',
+    carrierName: 'Grand Guardian Tokio Marine (GGI)',
+    carrierLogo: 'GGI',
+    policyNumber: 'POL-MED-109482',
+    claimantNameEn: 'Daw Nilar Win',
+    claimantNameMm: 'ဒေါ်နီလာဝင်း',
+    nrcNumber: '9/MAHAMA(N)048124',
+    claimedAmount: 1650000,
+    currency: 'MMK',
+    status: 'Processing',
+    overallConfidence: 91.5,
+    templateMatchScore: 96.0,
+    matchedTemplateId: 'tmpl-ggi-health-02',
+    matchedTemplateName: 'GGI Tokio Marine Cashless Hospitalization (Med-H02)',
+    uploadedAt: '2026-08-25 07:50',
+    age: '49 mins ago',
+    assignedReviewer: 'Ko Sai Lu',
+    issuesCount: 0,
+    fields: []
+  },
+  {
+    id: 'doc-0882',
+    claimNumber: 'CLM-2026-0882',
+    fileName: 'CLM-2026-0882_AYA_FireDamage.pdf',
+    fileSize: '4.1 MB',
+    pageCount: 4,
+    claimType: 'Fire & Property',
+    carrierName: 'AYA SOMPO Insurance',
+    carrierLogo: 'AYA',
+    policyNumber: 'POL-FIR-773821',
+    claimantNameEn: 'U Zaw Min Oo',
+    claimantNameMm: 'ဦးဇော်မင်းဦး',
+    nrcNumber: '14/DADANA(N)219401',
+    claimedAmount: 28500000,
+    currency: 'MMK',
+    status: 'Processing',
+    overallConfidence: 89.0,
+    templateMatchScore: 94.2,
+    matchedTemplateId: 'tmpl-aya-fire-03',
+    matchedTemplateName: 'AYA SOMPO Commercial Property & Fire Claim (Form-F01)',
+    uploadedAt: '2026-08-25 07:30',
+    age: '1 hr ago',
+    assignedReviewer: 'Ma Thiri',
+    issuesCount: 1,
+    fields: []
+  },
+  {
+    id: 'doc-0881',
+    claimNumber: 'CLM-2026-0881',
+    fileName: 'CLM-2026-0881_IKBZ_LifeDeathClaim.pdf',
+    fileSize: '3.2 MB',
+    pageCount: 2,
+    claimType: 'Life & Beneficiary',
+    carrierName: 'IKBZ Insurance',
+    carrierLogo: 'IKBZ',
+    policyNumber: 'POL-LIF-901844',
+    claimantNameEn: 'Daw Khin Hnin Kyi',
+    claimantNameMm: 'ဒေါ်ခင်နှင်းကြည်',
+    nrcNumber: '12/BAHANA(N)091823',
+    claimedAmount: 50000000,
+    currency: 'MMK',
+    status: 'Ready to Sync',
+    overallConfidence: 98.2,
+    templateMatchScore: 99.1,
+    matchedTemplateId: 'tmpl-ikbz-life-04',
+    matchedTemplateName: 'IKBZ Life Group Term Policy Death Benefit Claim',
+    uploadedAt: '2026-08-25 06:10',
+    age: '2 hrs ago',
+    assignedReviewer: 'Daw Khin Mar (You)',
+    issuesCount: 0,
+    fields: []
+  },
+  {
+    id: 'doc-0880',
+    claimNumber: 'CLM-2026-0880',
+    fileName: 'CLM-2026-0880_KBZ_MotorAccident.pdf',
+    fileSize: '1.9 MB',
+    pageCount: 2,
+    claimType: 'Motor / Vehicle',
+    carrierName: 'KBZ MS General Insurance',
+    carrierLogo: 'KBZ',
+    policyNumber: 'POL-MTR-20260312',
+    claimantNameEn: 'U Than Htike Aung',
+    claimantNameMm: 'ဦးသန်းထိုက်အောင်',
+    nrcNumber: '12/KAMAYA(N)110294',
+    claimedAmount: 1950000,
+    currency: 'MMK',
+    status: 'Ready to Sync',
+    overallConfidence: 96.7,
+    templateMatchScore: 98.9,
+    matchedTemplateId: 'tmpl-kbz-motor-01',
+    matchedTemplateName: 'KBZ MS Comprehensive Motor Claim (Form-M04)',
+    uploadedAt: '2026-08-25 05:40',
+    age: '3 hrs ago',
+    assignedReviewer: 'Ko Sai Lu',
+    issuesCount: 0,
+    fields: []
+  },
+  {
+    id: 'doc-0879',
+    claimNumber: 'CLM-2026-0879',
+    fileName: 'CLM-2026-0879_CB_CropFlood.pdf',
+    fileSize: '2.7 MB',
+    pageCount: 2,
+    claimType: 'Agricultural Crop',
+    carrierName: 'Citizen Business Insurance (CB)',
+    carrierLogo: 'CB',
+    policyNumber: 'POL-AGR-440192',
+    claimantNameEn: 'U Bo Ni',
+    claimantNameMm: 'ဦးဘိုနီ',
+    nrcNumber: '7/WAMANA(N)031948',
+    claimedAmount: 4200000,
+    currency: 'MMK',
+    status: 'Approved',
+    overallConfidence: 95.8,
+    templateMatchScore: 97.4,
+    matchedTemplateId: 'tmpl-cb-crop-05',
+    matchedTemplateName: 'CB Insurance Smallholder Crop Flood & Drought Relief',
+    uploadedAt: '2026-08-24 17:15',
+    age: 'Yesterday',
+    assignedReviewer: 'Ko Hlaing Bwar',
+    issuesCount: 0,
+    fields: []
+  },
+  {
+    id: 'doc-0878',
+    claimNumber: 'CLM-2026-0878',
+    fileName: 'CLM-2026-0878_MI_TravelDelayedBaggage.pdf',
+    fileSize: '1.2 MB',
+    pageCount: 1,
+    claimType: 'Travel & Accident',
+    carrierName: 'Myanma Insurance',
+    carrierLogo: 'MI',
+    policyNumber: 'POL-TRV-882019',
+    claimantNameEn: 'Ma Ei Ei Chaw',
+    claimantNameMm: 'မအိအိချော',
+    nrcNumber: '12/DAGANA(N)055102',
+    claimedAmount: 620000,
+    currency: 'MMK',
+    status: 'Approved',
+    overallConfidence: 97.1,
+    templateMatchScore: 98.0,
+    matchedTemplateId: 'tmpl-myanma-travel-06',
+    matchedTemplateName: 'Myanma Insurance Inbound/Outbound Travel Accident',
+    uploadedAt: '2026-08-24 15:45',
+    age: 'Yesterday',
+    assignedReviewer: 'Daw Khin Mar',
+    issuesCount: 0,
+    fields: []
+  }
+];
+
+export const INITIAL_AUDIT_LOGS: AuditEvent[] = [
+  {
+    id: 'aud-232',
+    timestamp: '2026-08-25 08:15:22',
+    documentId: 'doc-0884',
+    documentRef: 'CLM-2026-0884',
+    actor: {
+      name: 'Burmese OCR Script Engine (v4.2)',
+      role: 'Automated Microservice',
+      avatar: 'AI'
+    },
+    actionType: 'OCR_EXTRACTED',
+    description: 'Extracted 17 fields from KBZ_MotorClaim.pdf with 84.2% average confidence score. Flagged 2 validation alerts.',
+    details: {
+      destination: 'Review Queue',
+      confidenceDelta: 84.2
+    }
+  },
+  {
+    id: 'aud-231',
+    timestamp: '2026-08-25 08:10:45',
+    documentId: 'doc-0881',
+    documentRef: 'CLM-2026-0881',
+    actor: {
+      name: 'Daw Khin Mar',
+      role: 'Senior Claims Lead',
+      avatar: 'KM'
+    },
+    actionType: 'DOCUMENT_APPROVED',
+    description: 'Verified death certificate and approved beneficiary claim payout of 50,000,000 MMK for ERP dispatch.',
+    details: {
+      oldValue: 'Needs Review',
+      newValue: 'Ready to Sync'
+    }
+  },
+  {
+    id: 'aud-230',
+    timestamp: '2026-08-25 07:52:10',
+    documentId: 'doc-0883',
+    documentRef: 'CLM-2026-0883',
+    actor: {
+      name: 'Layout & Template Matcher',
+      role: 'Microservice',
+      avatar: 'TM'
+    },
+    actionType: 'OCR_EXTRACTED',
+    description: 'Matched GGI Tokio Marine Form-H02 with 96.0% layout precision. 22 regions projected onto 3 scanned pages.',
+    details: {
+      destination: 'Processing Pipeline'
+    }
+  },
+  {
+    id: 'aud-229',
+    timestamp: '2026-08-25 07:44:18',
+    documentId: 'doc-0880',
+    documentRef: 'CLM-2026-0880',
+    actor: {
+      name: 'Ko Sai Lu',
+      role: 'Claims Specialist',
+      avatar: 'SL'
+    },
+    actionType: 'FIELD_CORRECTED',
+    description: 'Corrected vehicle license plate from "7N-48Z1" to "7N-4821" matching chassis registration certificate.',
+    details: {
+      field: 'vehicle_plate_no',
+      oldValue: '7N-48Z1',
+      newValue: '7N-4821',
+      confidenceDelta: 24.5
+    }
+  },
+  {
+    id: 'aud-228',
+    timestamp: '2026-08-25 06:30:00',
+    actor: {
+      name: 'Core ERP Sync Gateway',
+      role: 'Automated Worker',
+      avatar: 'GW'
+    },
+    actionType: 'SYNCED_CORE_ERP',
+    description: 'Batch synchronized 12 approved claim records into KBZ MS Oracle Core Claims Ledger.',
+    details: {
+      destination: 'KBZ Core ERP (Endpoint: /api/v2/claims/inbound)'
+    }
+  },
+  {
+    id: 'aud-227',
+    timestamp: '2026-08-24 16:30:11',
+    templateId: 'tmpl-kbz-motor-01',
+    templateName: 'KBZ MS Comprehensive Motor Claim (Form-M04)',
+    actor: {
+      name: 'Daw Khin Mar',
+      role: 'Lead Reviewer',
+      avatar: 'KM'
+    },
+    actionType: 'TEMPLATE_MODIFIED',
+    description: 'Published template version v2.4 with updated Burmese Unicode bounding box coordinates for claimant signature section.',
+    details: {
+      oldValue: 'v2.3',
+      newValue: 'v2.4'
+    }
+  },
+  {
+    id: 'aud-226',
+    timestamp: '2026-08-24 15:10:04',
+    documentId: 'doc-0878',
+    documentRef: 'CLM-2026-0878',
+    actor: {
+      name: 'Ma Thiri',
+      role: 'Claims Reviewer',
+      avatar: 'MT'
+    },
+    actionType: 'DOCUMENT_APPROVED',
+    description: 'Approved baggage loss reimbursement claim of 620,000 MMK for Myanma Insurance voucher dispatch.',
+    details: {
+      oldValue: 'Needs Review',
+      newValue: 'Approved'
+    }
+  },
+  {
+    id: 'aud-225',
+    timestamp: '2026-08-24 14:02:50',
+    actor: {
+      name: 'Ko Sai Lu',
+      role: 'Template Specialist',
+      avatar: 'SL'
+    },
+    actionType: 'BATCH_EXPORTED',
+    description: 'Exported 45 verified claims records to XLSX format for weekly insurance regulatory audit filing.',
+    details: {
+      destination: 'FSA_Weekly_Export_20260824.xlsx'
+    }
+  }
+];
+
+export const MOCK_NOTIFICATIONS = [
+  {
+    id: 'notif-1',
+    title: 'New High-Value Claim Uploaded',
+    message: 'CLM-2026-0884 (KBZ Motor Claim, 3.85M MMK) requires reviewer attention.',
+    time: '24 mins ago',
+    unread: true,
+    type: 'alert'
+  },
+  {
+    id: 'notif-2',
+    title: 'Template Validation Complete',
+    message: 'GGI Tokio Marine (Med-H02) auto-region map generated with 94.2% accuracy.',
+    time: '2 hrs ago',
+    unread: true,
+    type: 'info'
+  },
+  {
+    id: 'notif-3',
+    title: 'ERP Sync Succeeded',
+    message: '12 approved claim batches transmitted to KBZ MS Core Gateway.',
+    time: '4 hrs ago',
+    unread: false,
+    type: 'success'
+  }
+];

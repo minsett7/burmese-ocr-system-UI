@@ -1,0 +1,6 @@
+{
+  "name": "FormFlow OCR",
+  "description": "Enterprise insurance claim document OCR operations platform for claims reviewers in Myanmar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
