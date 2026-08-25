@@ -37,21 +37,33 @@ async function pause(milliseconds: number, signal?: AbortSignal): Promise<void> 
   });
 }
 
-export async function analyzeTemplate(
-  file: File, metadata: { name: string; description?: string; formTypeId: string },
-  onProgress?: (progress: { stage: string; percent: number; message?: string }) => void, signal?: AbortSignal,
-): Promise<TemplateRegistration> {
+export async function startTemplateAnalysis(
+  file: File, metadata: { name: string; description?: string; formTypeId: string }, signal?: AbortSignal,
+): Promise<{ id: string; status: string; progress: { stage: string; percent: number; message?: string } }> {
   const form = new FormData();
   form.append('file', file); form.append('name', metadata.name); form.append('description', metadata.description ?? '');
   form.append('form_type_id', metadata.formTypeId); form.append('language', 'my-en'); form.append('preprocessing_policy', 'auto');
-  const accepted = await request<Json>('/api/v1/template-registrations', { method: 'POST', body: form, signal });
+  return request('/api/v1/template-registrations', { method: 'POST', body: form, signal });
+}
+
+export async function waitForTemplateAnalysis(
+  id: string, onProgress?: (progress: { stage: string; percent: number; message?: string }) => void, signal?: AbortSignal,
+): Promise<TemplateRegistration> {
   while (true) {
     signal?.throwIfAborted();
-    const current = await request<Json>(`/api/v1/template-registrations/${encodeURIComponent(accepted.id)}`, { signal });
+    const current = await request<Json>(`/api/v1/template-registrations/${encodeURIComponent(id)}`, { signal });
     onProgress?.(current.progress ?? { stage: current.status, percent: 0 });
     if (terminalRegistrationStatuses.has(current.status)) return adaptRegistration(current);
     await pause(1000, signal);
   }
+}
+
+export async function analyzeTemplate(
+  file: File, metadata: { name: string; description?: string; formTypeId: string },
+  onProgress?: (progress: { stage: string; percent: number; message?: string }) => void, signal?: AbortSignal,
+): Promise<TemplateRegistration> {
+  const accepted = await startTemplateAnalysis(file, metadata, signal);
+  return waitForTemplateAnalysis(accepted.id, onProgress, signal);
 }
 
 export async function saveTemplateDraft(registration: TemplateRegistration, regions: EditableRegion[]): Promise<TemplateRegistration> {
@@ -69,6 +81,8 @@ export const beginTemplateRevision = async (id: string): Promise<TemplateRegistr
   adaptRegistration(await request<Json>(`/api/v1/template-registrations/${encodeURIComponent(id)}/revisions`, { method: 'POST' }));
 export const deleteTemplateRegistration = (id: string): Promise<void> =>
   request(`/api/v1/template-registrations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export const retryTemplateAnalysis = (id: string): Promise<Json> =>
+  request(`/api/v1/template-registrations/${encodeURIComponent(id)}/retry`, { method: 'POST' });
 
 export async function processDocument(
   file: File, templateId: string, templates: OCRTemplate[],

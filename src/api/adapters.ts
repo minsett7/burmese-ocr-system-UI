@@ -45,7 +45,9 @@ function dataType(value?: string): ExtractedField['dataType'] {
 
 function templateStatus(status: string): OCRTemplate['status'] {
   if (status === 'active' || status === 'registered') return 'Active';
-  if (status === 'needs_approval' || status === 'needs_resubmission') return 'Awaiting Approval';
+  if (status === 'needs_approval') return 'Awaiting Approval';
+  if (status === 'needs_resubmission') return 'Needs New Upload';
+  if (status === 'failed') return 'Failed';
   if (status === 'archived' || status === 'deprecated') return 'Deprecated';
   return 'Draft';
 }

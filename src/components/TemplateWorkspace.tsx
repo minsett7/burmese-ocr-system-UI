@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, ChevronDown, FilePlus2, Loader2, Plus, Save, Trash2, Upload, WandSparkles } from 'lucide-react';
-import { analyzeTemplate, approveTemplate, beginTemplateRevision, deleteTemplateRegistration, saveTemplateDraft, technicalError, userError, validateTemplate } from '../api';
-import { EditableRegion, FormCategory, ProgressState, TemplateRegistration } from '../types';
+import { AlertCircle, Check, ChevronDown, FilePlus2, Loader2, Plus, RefreshCw, Save, Trash2, Upload, WandSparkles } from 'lucide-react';
+import { approveTemplate, beginTemplateRevision, deleteTemplateRegistration, retryTemplateAnalysis, saveTemplateDraft, startTemplateAnalysis, technicalError, userError, validateTemplate } from '../api';
+import { EditableRegion, FormCategory, TemplateRegistration } from '../types';
 
 interface TemplateWorkspaceProps {
   registrations: TemplateRegistration[];
@@ -14,9 +14,12 @@ interface TemplateWorkspaceProps {
 
 const allowedFilePattern = /\.(pdf|png|jpe?g|webp|tiff?)$/i;
 const friendlyStages: Record<string, string> = {
-  upload_validation: 'Checking your file…', capture_quality: 'Preparing a clear document image…',
-  layout_extraction: 'Finding form fields…', ocr_context: 'Reading labels and context…',
-  semantic_analysis: 'Understanding field meanings…', human_review: 'Preparing your review…',
+  queued: 'Waiting to start...', upload_validation: 'Checking your file...',
+  visual_upload: 'Sending the form for analysis...', preprocessing: 'Preparing a clear document image...',
+  capture_quality: 'Checking document image quality...', layout_and_ocr: 'Finding fields and reading labels...',
+  contract_validation: 'Checking the detected form structure...', semantic_mapping: 'Understanding field meanings...',
+  vlm_poll: 'Understanding field meanings...', relationship_validation: 'Checking field relationships...',
+  human_review: 'Preparing your review...',
   registered: 'Template saved', failed: 'Analysis stopped',
 };
 
@@ -29,11 +32,11 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [formTypeId, setFormTypeId] = useState('motor');
+  const [creating, setCreating] = useState(registrations.length === 0);
   const [regions, setRegions] = useState<EditableRegion[]>([]);
   const [selectedRegionId, setSelectedRegionId] = useState<string>();
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<ProgressState>();
   const [error, setError] = useState('');
   const [details, setDetails] = useState('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
@@ -54,6 +57,7 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
   const reviewCount = regions.filter(region => region.enabled !== false && region.review_required).length;
   const isEditable = Boolean(selected?.draft) && selected?.rawStatus !== 'registered';
   const canAnalyze = Boolean(file && name.trim() && formTypeId && !busy);
+  const isProcessing = Boolean(selected && !['needs_approval', 'needs_resubmission', 'registered', 'failed'].includes(selected.rawStatus));
 
   const visibleRegistrations = useMemo(
     () => [...registrations].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
@@ -75,16 +79,28 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
     if (!file || !canAnalyze) return;
     setBusy(true); setError(''); setDetails(''); setValidationErrors([]);
     try {
-      const result = await analyzeTemplate(file, { name: name.trim(), description, formTypeId }, setProgress);
-      if (result.rawStatus === 'failed') {
-        setError("We couldn't analyze this template. Verify the document quality and try again.");
-        setDetails(JSON.stringify(result.failure ?? {}, null, 2));
-      }
-      await onChanged(result.id);
-      onSelectRegistration(result.id);
+      const accepted = await startTemplateAnalysis(file, { name: name.trim(), description, formTypeId });
+      setFile(null); setCreating(false);
+      if (fileInput.current) fileInput.current.value = '';
+      await onChanged(accepted.id);
+      onSelectRegistration(accepted.id);
     } catch (caught) {
       setError(userError(caught)); setDetails(technicalError(caught));
     } finally { setBusy(false); }
+  }
+
+  function selectRegistration(id: string) {
+    setCreating(false); setFile(null); setError(''); setDetails(''); setValidationErrors([]);
+    if (fileInput.current) fileInput.current.value = '';
+    onSelectRegistration(id);
+  }
+
+  async function retryAnalysis() {
+    if (!selected || selected.rawStatus !== 'failed' || busy) return;
+    setBusy(true); setError(''); setDetails('');
+    try { await retryTemplateAnalysis(selected.id); await onChanged(selected.id); }
+    catch (caught) { setError(userError(caught)); setDetails(technicalError(caught)); }
+    finally { setBusy(false); }
   }
 
   function updateRegion(patch: Partial<EditableRegion>) {
@@ -141,11 +157,17 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
   }
 
   return <div className="mx-auto max-w-7xl space-y-5 pb-10">
+    {/* Keep the picker mounted even while an existing template is open. */}
+    <input ref={fileInput} className="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff" onChange={event => chooseFile(event.target.files?.[0] ?? null)}/>
     <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div><p className="text-xs font-bold uppercase tracking-widest text-blue-600">Template Studio</p>
         <h1 className="mt-1 text-2xl font-bold">Teach the system a blank claim form</h1>
         <p className="mt-1 text-sm text-slate-500">Upload, analyze, review the fields, and save. The OCR pipeline runs automatically.</p></div>
-      <button onClick={() => { setFile(null); setName(''); setError(''); fileInput.current?.click(); }}
+      <button onClick={() => {
+        setCreating(true); setFile(null); setName(''); setDescription(''); setError(''); setDetails(''); setValidationErrors([]);
+        if (fileInput.current) fileInput.current.value = '';
+        fileInput.current?.click();
+      }}
         className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700">
         <FilePlus2 className="h-4 w-4" /> New template
       </button>
@@ -155,11 +177,11 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
       <aside className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-slate-400">Templates</div>
         <div className="max-h-[70vh] space-y-1 overflow-y-auto">
-          {visibleRegistrations.map(item => <button key={item.id} onClick={() => onSelectRegistration(item.id)}
-            className={`w-full rounded-lg border p-3 text-left ${item.id === selected?.id ? 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+          {visibleRegistrations.map(item => <button key={item.id} onClick={() => selectRegistration(item.id)}
+            className={`w-full rounded-lg border p-3 text-left ${!creating && item.id === selected?.id ? 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/40' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
             <div className="truncate text-sm font-semibold">{item.name}</div>
             <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
-              <span className="truncate">{item.fileName}</span><span className={item.rawStatus === 'registered' ? 'text-emerald-600' : 'text-amber-600'}>{item.status}</span>
+              <span className="truncate">{item.fileName}</span><span className={item.rawStatus === 'registered' ? 'text-emerald-600' : item.rawStatus === 'failed' ? 'text-red-600' : item.rawStatus === 'needs_resubmission' ? 'text-orange-600' : 'text-amber-600'}>{item.status}</span>
             </div>
           </button>)}
           {!visibleRegistrations.length && <p className="p-4 text-center text-sm text-slate-500">No templates yet.</p>}
@@ -169,7 +191,11 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
       <section className="space-y-5">
         <div className="grid grid-cols-4 gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
           {['Upload', 'Analyze', 'Review', 'Save'].map((stage, index) => {
-            const current = busy ? Math.min(1, Number(progress?.percent ?? 0) / 100) : selected?.rawStatus === 'registered' ? 1 : selected?.draft ? .75 : file ? .2 : 0;
+            const current = creating
+              ? (busy ? .25 : file ? .2 : 0)
+              : selected?.rawStatus === 'registered' ? 1
+                : selected?.draft ? .75
+                  : selected ? Math.min(.5, Number(selected.progress?.percent ?? 5) / 100) : 0;
             const done = current >= (index + 1) / 4;
             return <div key={stage} className={`rounded-lg px-3 py-2 text-center text-xs font-bold ${done ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' : 'bg-slate-50 text-slate-400 dark:bg-slate-800'}`}>
               <span className="mr-1">{done ? '✓' : index + 1}.</span>{stage}
@@ -184,13 +210,12 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
           {details && <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold">Developer details</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap text-xs">{details}</pre></details>}
         </div>}
 
-        {(!selected?.draft || file) && <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+        {(creating || !selected) && <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
           <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFile(event.dataTransfer.files[0] ?? null); }}
             onClick={() => fileInput.current?.click()} className="cursor-pointer rounded-xl border-2 border-dashed border-slate-300 p-8 text-center hover:border-blue-400 hover:bg-blue-50/40 dark:border-slate-700 dark:hover:bg-blue-950/20">
             <Upload className="mx-auto h-8 w-8 text-blue-600"/><strong className="mt-3 block">{file?.name ?? 'Choose or drop a blank form'}</strong>
             <span className="mt-1 block text-xs text-slate-500">PDF, PNG, JPG, WEBP, or TIFF · up to the server upload limit</span>
           </div>
-          <input ref={fileInput} className="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff" onChange={event => chooseFile(event.target.files?.[0] ?? null)}/>
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <label className="text-xs font-semibold text-slate-600">Template name<input value={name} onChange={event => setName(event.target.value)} maxLength={160}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"/></label>
@@ -201,12 +226,48 @@ export const TemplateWorkspace: React.FC<TemplateWorkspaceProps> = ({
           <label className="mt-4 block text-xs font-semibold text-slate-600">Description (optional)<textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={2000}
             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950" rows={2}/></label>
           <button disabled={!canAnalyze} onClick={runAnalysis} className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin"/> : <WandSparkles className="h-4 w-4"/>}{busy ? friendlyStages[progress?.stage ?? ''] ?? progress?.message ?? 'Analyzing template…' : 'Analyze template'}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin"/> : <WandSparkles className="h-4 w-4"/>}{busy ? 'Starting analysis...' : 'Analyze template'}
           </button>
-          {busy && <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full bg-blue-600 transition-all" style={{width: `${progress?.percent ?? 4}%`}}/></div>}
         </div>}
 
-        {selected?.draft && !file && <>
+        {!creating && selected && !selected.draft && <div className="rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+          {isProcessing && <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <div className="rounded-full bg-blue-50 p-3 text-blue-600 dark:bg-blue-950/50"><Loader2 className="h-6 w-6 animate-spin"/></div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-bold">Analysis is running in the background</h2>
+              <p className="mt-1 text-sm text-slate-500">{friendlyStages[selected.progress?.stage ?? ''] ?? 'Analyzing the form and detecting its fields...'}</p>
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className="h-full bg-blue-600 transition-all" style={{width: `${Math.max(3, Number(selected.progress?.percent ?? 3))}%`}}/></div>
+              <div className="mt-2 flex justify-between text-xs text-slate-500"><span>You can open another template while this continues.</span><span>{Math.round(Number(selected.progress?.percent ?? 0))}%</span></div>
+            </div>
+          </div>}
+
+          {selected.rawStatus === 'failed' && <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <div className="rounded-full bg-red-50 p-3 text-red-600 dark:bg-red-950/50"><AlertCircle className="h-6 w-6"/></div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-bold">We couldn't analyze this template</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{selected.failure?.message ?? 'The analysis stopped before a review draft could be created.'}</p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button disabled={busy} onClick={retryAnalysis} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>} Retry analysis</button>
+                <button disabled={busy} onClick={removeTemplate} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2 text-sm font-bold text-red-600 disabled:opacity-50"><Trash2 className="h-4 w-4"/> Delete</button>
+              </div>
+              {selected.failure && <details className="mt-4"><summary className="cursor-pointer text-xs font-semibold text-slate-500">Developer details</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs dark:bg-slate-950">{JSON.stringify(selected.failure, null, 2)}</pre></details>}
+            </div>
+          </div>}
+
+          {selected.rawStatus === 'needs_resubmission' && <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+            <div className="rounded-full bg-amber-50 p-3 text-amber-600 dark:bg-amber-950/50"><AlertCircle className="h-6 w-6"/></div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-bold">A clearer form image is needed</h2>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">The uploaded image did not pass the document quality check. Start a new upload with a clearer scan or photo.</p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button onClick={() => { setCreating(true); setFile(null); setName(selected.name); setDescription(selected.description); setFormTypeId(selected.formTypeId); setError(''); fileInput.current?.click(); }} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white"><Upload className="h-4 w-4"/> Upload replacement</button>
+                <button disabled={busy} onClick={removeTemplate} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2 text-sm font-bold text-red-600 disabled:opacity-50"><Trash2 className="h-4 w-4"/> Delete</button>
+              </div>
+            </div>
+          </div>}
+        </div>}
+
+        {!creating && selected?.draft && <>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
             <div><h2 className="font-bold">{selected.name}</h2><p className="text-xs text-slate-500">{regions.filter(region => region.enabled !== false).length} fields · {reviewCount} need attention</p></div>
             <div className="flex gap-2">

@@ -99,7 +99,7 @@ export interface ClaimDocument {
   failure?: BackendFailure | null;
 }
 
-export type TemplateStatus = 'Active' | 'Awaiting Approval' | 'Draft' | 'Deprecated';
+export type TemplateStatus = 'Active' | 'Awaiting Approval' | 'Draft' | 'Failed' | 'Needs New Upload' | 'Deprecated';
 
 export interface EditableRegion {
   id: string;
