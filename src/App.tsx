@@ -1,17 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  NavView, 
-  ClaimDocument, 
-  OCRTemplate, 
-  AuditEvent, 
-  ServiceHealth 
-} from './types';
-import { 
-  INITIAL_DOCUMENTS, 
-  INITIAL_TEMPLATES, 
-  INITIAL_AUDIT_LOGS, 
-  INITIAL_SERVICES 
-} from './data/mockData';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, Loader2, X } from 'lucide-react';
+import { approveDocument, deleteDocument, fetchServiceHealth, loadDashboard, processDocument, reprocessDocument, saveDocumentCorrections, syncDocument, userError } from './api';
+import { AuditEvent, ClaimDocument, FormCategory, NavView, OCRTemplate, ProgressState, ServiceHealth, TemplateRegistration } from './types';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { WorkQueue } from './components/WorkQueue';
@@ -24,310 +14,111 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<NavView>('work-queue');
-  const [documents, setDocuments] = useState<ClaimDocument[]>(INITIAL_DOCUMENTS);
-  const [templates, setTemplates] = useState<OCRTemplate[]>(INITIAL_TEMPLATES);
-  const [auditLogs, setAuditLogs] = useState<AuditEvent[]>(INITIAL_AUDIT_LOGS);
-  const [services] = useState<ServiceHealth[]>(INITIAL_SERVICES);
+  const [documents, setDocuments] = useState<ClaimDocument[]>([]);
+  const [templates, setTemplates] = useState<OCRTemplate[]>([]);
+  const [registrations, setRegistrations] = useState<TemplateRegistration[]>([]);
+  const [formCategories, setFormCategories] = useState<FormCategory[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
+  const [services, setServices] = useState<ServiceHealth[]>([]);
+  const [selectedDocId, setSelectedDocId] = useState('');
+  const [selectedRegistrationId, setSelectedRegistrationId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [appError, setAppError] = useState('');
+  const [darkMode] = useState(() => localStorage.getItem('formflow_dark_mode') === 'true');
+  const [isBurmese] = useState(() => localStorage.getItem('formflow_is_burmese') === 'true');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showServiceHealthModal, setShowServiceHealthModal] = useState(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
 
-  const [selectedDocId, setSelectedDocId] = useState<string>('doc-0884');
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('tmpl-kbz-motor-01');
-
-  // UI customization states
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('formflow_dark_mode');
-    return saved ? saved === 'true' : false;
-  });
-  const [isBurmese, setIsBurmese] = useState<boolean>(() => {
-    const saved = localStorage.getItem('formflow_is_burmese');
-    return saved ? saved === 'true' : false;
-  });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Modals
-  const [showServiceHealthModal, setShowServiceHealthModal] = useState<boolean>(false);
-  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
-  const [showExportModal, setShowExportModal] = useState<boolean>(false);
-
-  // Sync dark mode class with root and localStorage
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-      localStorage.setItem('formflow_dark_mode', 'true');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.body.classList.remove('dark');
-      localStorage.setItem('formflow_dark_mode', 'false');
-    }
-  }, [darkMode]);
-
-  useEffect(() => {
-    localStorage.setItem('formflow_is_burmese', String(isBurmese));
-  }, [isBurmese]);
-
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // ⌘K or Ctrl+K for search
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        const searchInput = document.getElementById('global-search-input') as HTMLInputElement;
-        if (searchInput) searchInput.focus();
-      }
-      // ? for shortcuts
-      if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
-        e.preventDefault();
-        setShowShortcutsModal(prev => !prev);
-      }
-      // Esc to close modals
-      if (e.key === 'Escape') {
-        setShowServiceHealthModal(false);
-        setShowShortcutsModal(false);
-        setShowExportModal(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+  const refreshData = useCallback(async (preferredRegistrationId?: string) => {
+    try {
+      const data = await loadDashboard();
+      setDocuments(data.documents); setTemplates(data.templates); setRegistrations(data.registrations);
+      setFormCategories(data.formCategories); setAuditLogs(data.auditEvents); setAppError('');
+      setSelectedDocId(current => current && data.documents.some(item => item.id === current) ? current : data.documents[0]?.id ?? '');
+      setSelectedRegistrationId(current => {
+        if (preferredRegistrationId && data.registrations.some(item => item.id === preferredRegistrationId)) return preferredRegistrationId;
+        return current && data.registrations.some(item => item.id === current) ? current : data.registrations[0]?.id ?? '';
+      });
+    } catch (error) { setAppError(userError(error)); }
+    finally { setLoading(false); }
   }, []);
 
-  const selectedDocument = documents.find(d => d.id === selectedDocId) || documents[0];
-  const selectedTemplate = templates.find(t => t.id === selectedTemplateId) || templates[0];
+  const refreshHealth = useCallback(async () => {
+    try { setServices(await fetchServiceHealth()); } catch { setServices([]); }
+  }, []);
 
-  const handleUpdateDocument = (updatedDoc: ClaimDocument) => {
-    setDocuments(prev => prev.map(d => d.id === updatedDoc.id ? updatedDoc : d));
-  };
-
-  const handleUpdateTemplate = (updatedTmpl: OCRTemplate) => {
-    setTemplates(prev => prev.map(t => t.id === updatedTmpl.id ? updatedTmpl : t));
-    // Log audit event
-    const newAudit: AuditEvent = {
-      id: `aud-${Date.now().toString().slice(-4)}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      templateId: updatedTmpl.id,
-      templateName: updatedTmpl.name,
-      actor: {
-        name: 'Daw Khin Mar',
-        role: 'Senior Claims Lead',
-        avatar: 'KM'
-      },
-      actionType: 'TEMPLATE_MODIFIED',
-      description: `Updated template ${updatedTmpl.code} configuration. Total regions: ${updatedTmpl.regions.length}.`,
-      details: {
-        oldValue: updatedTmpl.status,
-        newValue: updatedTmpl.status
-      }
+  useEffect(() => { void refreshData(); void refreshHealth(); }, [refreshData, refreshHealth]);
+  useEffect(() => {
+    const hasActiveJobs = documents.some(item => item.rawStatus === 'uploaded' || item.rawStatus === 'processing') ||
+      registrations.some(item => !['needs_approval', 'needs_resubmission', 'registered', 'failed'].includes(item.rawStatus));
+    if (!hasActiveJobs) return;
+    const timer = window.setInterval(() => void refreshData(), 3000);
+    return () => window.clearInterval(timer);
+  }, [documents, registrations, refreshData]);
+  useEffect(() => { const timer = window.setInterval(() => void refreshHealth(), 30000); return () => window.clearInterval(timer); }, [refreshHealth]);
+  useEffect(() => { document.documentElement.classList.toggle('dark', darkMode); }, [darkMode]);
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); document.getElementById('global-search-input')?.focus(); }
+      if (event.key === '?' && !['INPUT','TEXTAREA','SELECT'].includes((event.target as HTMLElement).tagName)) setShowShortcutsModal(value => !value);
+      if (event.key === 'Escape') { setShowServiceHealthModal(false); setShowShortcutsModal(false); setShowExportModal(false); }
     };
-    setAuditLogs(prev => [newAudit, ...prev]);
-  };
+    window.addEventListener('keydown', handle); return () => window.removeEventListener('keydown', handle);
+  }, []);
 
-  const handleReviewDocument = (doc: ClaimDocument) => {
-    setSelectedDocId(doc.id);
-    setCurrentView('process-doc');
-  };
+  const selectedDocument = documents.find(item => item.id === selectedDocId);
+  const selectedTemplate = templates.find(item => item.registrationId === selectedRegistrationId || item.id === selectedRegistrationId);
+  const needsReviewCount = documents.filter(item => item.status === 'Needs Review').length;
+  const templateDraftsCount = registrations.filter(item => item.status === 'Awaiting Approval').length;
 
-  const handleApproveAndNext = (doc: ClaimDocument) => {
-    const updatedDoc: ClaimDocument = {
-      ...doc,
-      status: 'Approved',
-      issuesCount: 0
-    };
-    handleUpdateDocument(updatedDoc);
+  function navigate(view: NavView) {
+    if (view === 'reports-export') setShowExportModal(true); else setCurrentView(view);
+  }
 
-    // Add audit log
-    const newAudit: AuditEvent = {
-      id: `aud-${Date.now().toString().slice(-4)}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      documentId: doc.id,
-      documentRef: doc.claimNumber,
-      actor: {
-        name: 'Daw Khin Mar',
-        role: 'Senior Claims Lead',
-        avatar: 'KM'
-      },
-      actionType: 'DOCUMENT_APPROVED',
-      description: `Approved claim ${doc.claimNumber} (${doc.carrierName}) for payout of ${doc.claimedAmount.toLocaleString()} MMK.`,
-      details: {
-        oldValue: doc.status,
-        newValue: 'Approved'
-      }
-    };
-    setAuditLogs(prev => [newAudit, ...prev]);
+  async function handleProcess(file: File, templateId: string, onProgress: (value: ProgressState) => void) {
+    const result = await processDocument(file, templateId, templates, onProgress);
+    setDocuments(current => [result, ...current.filter(item => item.id !== result.id)]);
+    setSelectedDocId(result.id);
+    await refreshData();
+  }
 
-    // Find next document in queue
-    const remaining = documents.filter(d => d.id !== doc.id && d.status === 'Needs Review');
-    if (remaining.length > 0) {
-      setSelectedDocId(remaining[0].id);
-    } else {
-      setCurrentView('work-queue');
-    }
-  };
+  async function refreshSelectedDocument(id: string) {
+    await refreshData(); setSelectedDocId(id);
+  }
 
-  const handleMarkReadyToSync = (doc: ClaimDocument) => {
-    const updatedDoc: ClaimDocument = {
-      ...doc,
-      status: 'Ready to Sync'
-    };
-    handleUpdateDocument(updatedDoc);
-
-    const newAudit: AuditEvent = {
-      id: `aud-${Date.now().toString().slice(-4)}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      documentId: doc.id,
-      documentRef: doc.claimNumber,
-      actor: {
-        name: 'Daw Khin Mar',
-        role: 'Senior Claims Lead',
-        avatar: 'KM'
-      },
-      actionType: 'STATUS_CHANGED',
-      description: `Marked claim ${doc.claimNumber} ready for bulk ERP sync dispatch.`,
-      details: {
-        oldValue: doc.status,
-        newValue: 'Ready to Sync'
-      }
-    };
-    setAuditLogs(prev => [newAudit, ...prev]);
-  };
-
-  const handleFlagForRescan = (doc: ClaimDocument) => {
-    const updatedDoc: ClaimDocument = {
-      ...doc,
-      status: 'Flagged for Re-scan'
-    };
-    handleUpdateDocument(updatedDoc);
-
-    const newAudit: AuditEvent = {
-      id: `aud-${Date.now().toString().slice(-4)}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      documentId: doc.id,
-      documentRef: doc.claimNumber,
-      actor: {
-        name: 'Daw Khin Mar',
-        role: 'Senior Claims Lead',
-        avatar: 'KM'
-      },
-      actionType: 'STATUS_CHANGED',
-      description: `Flagged document ${doc.fileName} for high-resolution physical scanner re-capture.`,
-      details: {
-        oldValue: doc.status,
-        newValue: 'Flagged for Re-scan'
-      }
-    };
-    setAuditLogs(prev => [newAudit, ...prev]);
-    setCurrentView('work-queue');
-  };
-
-  const needsReviewCount = documents.filter(d => d.status === 'Needs Review').length;
-  const templateDraftsCount = templates.filter(t => t.status === 'Awaiting Approval').length;
-
-  return (
-    <div className={`flex h-screen w-full bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden dark:bg-slate-950 dark:text-slate-100 transition-colors ${darkMode ? 'dark' : ''}`}>
-      {/* Left Collapsible Navigation */}
-      <Sidebar
-        currentView={currentView}
-        onSelectView={(view) => {
-          if (view === 'reports-export') {
-            setShowExportModal(true);
-          } else {
-            setCurrentView(view);
-          }
-        }}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        needsReviewCount={needsReviewCount}
-        templateDraftsCount={templateDraftsCount}
-        isBurmese={isBurmese}
-      />
-
-      {/* Main Content Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top Header Bar */}
-        <TopBar
-          currentView={currentView}
-          darkMode={darkMode}
-          onToggleDarkMode={() => setDarkMode(!darkMode)}
-          isBurmese={isBurmese}
-          onToggleBurmese={() => setIsBurmese(!isBurmese)}
-          onOpenShortcuts={() => setShowShortcutsModal(true)}
-          onOpenServiceHealth={() => setShowServiceHealthModal(true)}
-          services={services}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          selectedDocClaimNo={currentView === 'process-doc' ? selectedDocument?.claimNumber : undefined}
-          selectedTemplateCode={currentView === 'templates' ? selectedTemplate?.code : undefined}
-        />
-
-        {/* Dynamic Workspace View */}
-        <main className="flex-1 overflow-y-auto p-6 lg:p-8">
-          {currentView === 'work-queue' && (
-            <WorkQueue
-              documents={documents}
-              onReviewDocument={handleReviewDocument}
-              onNavigateToTemplates={() => setCurrentView('templates')}
-              onNavigateToProcessDocs={() => setCurrentView('process-doc')}
-              isBurmese={isBurmese}
-              searchQuery={searchQuery}
-            />
-          )}
-
-          {currentView === 'templates' && (
-            <TemplateWorkspace
-              templates={templates}
-              selectedTemplate={selectedTemplate}
-              onSelectTemplate={(tmpl) => setSelectedTemplateId(tmpl.id)}
-              onUpdateTemplate={handleUpdateTemplate}
-              isBurmese={isBurmese}
-            />
-          )}
-
-          {currentView === 'process-doc' && selectedDocument && (
-            <ProcessDocumentView
-              document={selectedDocument}
-              onUpdateDocument={handleUpdateDocument}
-              onApproveAndNext={handleApproveAndNext}
-              onMarkReadyToSync={handleMarkReadyToSync}
-              onFlagForRescan={handleFlagForRescan}
-              isBurmese={isBurmese}
-              onNavigateBack={() => setCurrentView('work-queue')}
-            />
-          )}
-
-          {currentView === 'records' && (
-            <RecordsView
-              documents={documents}
-              auditLogs={auditLogs}
-              onOpenDocumentDetail={handleReviewDocument}
-              isBurmese={isBurmese}
-              onOpenExportModal={() => setShowExportModal(true)}
-            />
-          )}
-        </main>
-      </div>
-
-      {/* Structured Export Modal */}
-      <ReportsExportModal
-        isOpen={showExportModal}
-        onClose={() => setShowExportModal(false)}
-        documents={documents}
-        isBurmese={isBurmese}
-      />
-
-      {/* Service Telemetry Health Modal */}
-      <ServiceHealthModal
-        isOpen={showServiceHealthModal}
-        onClose={() => setShowServiceHealthModal(false)}
-        services={services}
-        isBurmese={isBurmese}
-      />
-
-      {/* Keyboard Shortcuts Modal */}
-      <ShortcutsModal
-        isOpen={showShortcutsModal}
-        onClose={() => setShowShortcutsModal(false)}
-        isBurmese={isBurmese}
-      />
+  return <div className="flex h-screen w-full overflow-hidden bg-[#F8FAFC] font-sans text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100">
+    <Sidebar currentView={currentView} onSelectView={navigate} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(value => !value)}
+      needsReviewCount={needsReviewCount} templateDraftsCount={templateDraftsCount} isBurmese={isBurmese}/>
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <TopBar currentView={currentView} isBurmese={isBurmese} onOpenServiceHealth={() => setShowServiceHealthModal(true)} services={services}
+        searchQuery={searchQuery} onSearchChange={setSearchQuery} selectedDocClaimNo={currentView === 'process-doc' ? selectedDocument?.claimNumber : undefined}
+        selectedTemplateCode={currentView === 'templates' ? selectedTemplate?.code : undefined}/>
+      {appError && <div className="mx-6 mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+        <AlertCircle className="h-4 w-4"/><span className="flex-1">{appError}</span><button onClick={() => setAppError('')}><X className="h-4 w-4"/></button></div>}
+      <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+        {loading ? <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="h-5 w-5 animate-spin"/>Connecting to the OCR platform…</div> : <>
+          {currentView === 'work-queue' && <WorkQueue documents={documents} onReviewDocument={doc => {setSelectedDocId(doc.id);setCurrentView('process-doc');}}
+            onNavigateToTemplates={() => setCurrentView('templates')} onNavigateToProcessDocs={() => setCurrentView('process-doc')}
+            isBurmese={isBurmese} searchQuery={searchQuery} templateDraftsCount={templateDraftsCount} onRefresh={refreshData}/>}
+          {currentView === 'templates' && <TemplateWorkspace registrations={registrations} categories={formCategories} selectedRegistrationId={selectedRegistrationId}
+            onSelectRegistration={setSelectedRegistrationId} onChanged={refreshData} isBurmese={isBurmese}/>}
+          {currentView === 'process-doc' && <ProcessDocumentView document={selectedDocument} templates={templates} onProcess={handleProcess}
+            onUpdateDocument={updated => setDocuments(current => current.map(item => item.id === updated.id ? updated : item))}
+            onSave={async doc => {await saveDocumentCorrections(doc);await refreshSelectedDocument(doc.id);}}
+            onApprove={async doc => {if (doc.fields.some(field => field.isEdited)) await saveDocumentCorrections(doc);await approveDocument(doc.id);await refreshSelectedDocument(doc.id);}}
+            onSync={async doc => {await syncDocument(doc.id);await refreshSelectedDocument(doc.id);}}
+            onReprocess={async doc => {await reprocessDocument(doc.id);await refreshSelectedDocument(doc.id);}}
+            onDelete={async doc => {await deleteDocument(doc.id);await refreshData();setCurrentView('work-queue');}} onNavigateBack={() => setCurrentView('work-queue')}/>}
+          {currentView === 'records' && <RecordsView documents={documents} auditLogs={auditLogs} onOpenDocumentDetail={doc => {setSelectedDocId(doc.id);setCurrentView('process-doc');}}
+            isBurmese={isBurmese} onOpenExportModal={() => setShowExportModal(true)}/>}
+        </>}
+      </main>
     </div>
-  );
+    <ReportsExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} documents={documents} isBurmese={isBurmese}/>
+    <ServiceHealthModal isOpen={showServiceHealthModal} onClose={() => setShowServiceHealthModal(false)} services={services} isBurmese={isBurmese}/>
+    <ShortcutsModal isOpen={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} isBurmese={isBurmese}/>
+  </div>;
 }

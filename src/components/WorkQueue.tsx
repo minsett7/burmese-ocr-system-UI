@@ -25,6 +25,8 @@ interface WorkQueueProps {
   onNavigateToProcessDocs: () => void;
   isBurmese: boolean;
   searchQuery: string;
+  templateDraftsCount?: number;
+  onRefresh?: () => Promise<void> | void;
 }
 
 export const WorkQueue: React.FC<WorkQueueProps> = ({
@@ -33,7 +35,9 @@ export const WorkQueue: React.FC<WorkQueueProps> = ({
   onNavigateToTemplates,
   onNavigateToProcessDocs,
   isBurmese,
-  searchQuery
+  searchQuery,
+  templateDraftsCount = 0,
+  onRefresh,
 }) => {
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
@@ -42,8 +46,7 @@ export const WorkQueue: React.FC<WorkQueueProps> = ({
   // Compute key metrics
   const needsReviewCount = documents.filter(d => d.status === 'Needs Review').length;
   const processingCount = documents.filter(d => d.status === 'Processing').length;
-  const readyToSyncCount = 14; // live sync batch metric
-  const templateDraftsCount = 6; // templates awaiting approval
+  const readyToSyncCount = documents.filter(d => d.status === 'Ready to Sync').length;
 
   // Filter documents
   const filteredDocs = documents.filter(doc => {
@@ -74,9 +77,13 @@ export const WorkQueue: React.FC<WorkQueueProps> = ({
     return true;
   });
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 600);
+    try {
+      await onRefresh?.();
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const getStatusBadge = (status: DocumentStatus) => {
